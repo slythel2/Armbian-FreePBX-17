@@ -5,11 +5,10 @@
 # TARGET:   Debian 12 (Bookworm)
 # STACK:    Asterisk 21 (Pre-compiled) + FreePBX 17 + PHP 8.2
 # AUTHOR:   Gemini & slythel2
-# DATE:     2025-12-14 (V5.1 Final Polish)
+# DATE:     2025-12-14 (V5.4 Final Stability)
 # ============================================================================
 
 # --- 1. USER CONFIGURATION ---
-# Assicurati che questo URL punti al tuo ARTIFACT V2 (quello con le librerie incluse!)
 ASTERISK_ARTIFACT_URL="https://github.com/slythel2/FreePBX-17-for-Armbian-12-Bookworm/releases/download/1.0/asterisk-21.12.0-arm64-debian12-v2.tar.gz"
 
 # Database root password
@@ -38,7 +37,7 @@ sleep 3
 log "Updating system and installing dependencies..."
 apt-get update && apt-get upgrade -y
 
-# Core dependencies (incl. pkg-config, libedit, libicu-dev)
+# Dependencies updated: added pkg-config, libicu-dev (for UCP), libedit2
 apt-get install -y \
     git curl wget vim htop subversion sox pkg-config \
     apache2 mariadb-server mariadb-client \
@@ -48,8 +47,8 @@ apt-get install -y \
     nodejs npm \
     || error "Failed to install base packages"
 
-# CRITICAL: Install PM2 explicitly (Required by FreePBX 17)
-log "Installing Node.js Process Manager (PM2)..."
+# CRITICAL FIX: Install PM2 explicitly (Required by FreePBX 17 process manager)
+log "Installing PM2..."
 npm install -g pm2@latest || error "Failed to install PM2"
 
 # --- 3. PHP 8.2 STACK & TUNING ---
@@ -135,9 +134,8 @@ a2enmod rewrite
 systemctl restart apache2
 
 log "Configuring Database..."
-# FORCE DB START (Fixes issues after cleanup/soft-reset)
-systemctl enable mariadb
-systemctl start mariadb 
+# CRITICAL FIX: Force DB start to avoid socket errors on re-install
+systemctl start mariadb
 sleep 2
 
 mysqladmin -u root password "$DB_ROOT_PASS" 2>/dev/null || true
@@ -159,7 +157,7 @@ tar xfz freepbx-17.0-latest.tgz
 cd freepbx
 
 log "Running FreePBX Installer..."
-# Removed strict error checking (|| error) to allow install to proceed even if non-critical warnings occur
+# IMPORTANT: Removed '|| error' to allow script to finish even if installer emits non-critical warnings
 ./install -n \
     --dbuser asterisk \
     --dbpass "$DB_ROOT_PASS" \
@@ -182,5 +180,4 @@ echo "   INSTALLATION COMPLETE!                               "
 echo "========================================================"
 echo "Web Access: http://$(hostname -I | cut -d' ' -f1)/admin"
 echo "DB Root Password: $DB_ROOT_PASS"
-echo "NOTE: If FreePBX shows warnings, run 'fwconsole ma installall' manually."
 echo "========================================================"
