@@ -45,7 +45,8 @@ sync
 
 Credits
 
-slythel2
-Amlogic (for the base image)
-FreePBX & Asterisk Open Source Projects
-Cheap powerful hardware off Amazon with malware in it
+slythel2,
+
+Amlogic (for the base image),
+
+FreePBX & Asterisk Open Source Projects.
