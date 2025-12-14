@@ -10,7 +10,7 @@
 
 # --- 1. CONFIGURATION ---
 DB_ROOT_PASS="armbianpbx" # Default SQL root password
-LOG_FILE="/var/log/pbx_install.log"
+LOG_FILE="/var/log/pbx_legacy_install.log"
 DEBIAN_FRONTEND=noninteractive
 
 # Output Colors
@@ -39,12 +39,14 @@ apt-get update && apt-get upgrade -y || error "System update failed"
 
 # --- 3. BUILD DEPENDENCIES ---
 log "Installing build dependencies and essential tools..."
-# Note: These development libraries (SRTP, Jansson, XML, SQLite, UUID) 
-# are specifically required to compile Asterisk from source.
+# Updated with: pkg-config (vital for configure), subversion (for mp3 sources),
+# libicu-dev (for UCP/Intl), and libedit-dev (for Asterisk CLI).
 apt-get install -y \
     git curl wget vim htop sox build-essential \
+    pkg-config subversion \
     libncurses5-dev libncursesw5-dev libxml2-dev libsqlite3-dev \
     libssl-dev uuid-dev libjansson-dev libedit-dev libxslt1-dev \
+    libicu-dev \
     libsrtp2-dev libopus-dev libvorbis-dev libspeex-dev \
     libspeexdsp-dev libgsm1-dev portaudio19-dev \
     unixodbc unixodbc-dev odbcinst libltdl-dev \
@@ -65,11 +67,14 @@ apt-get install -y \
     php-ldap php-pear libapache2-mod-php \
     || error "Failed to install PHP"
 
-# --- 5. NODE.JS ---
-# FreePBX 17 requires Node 18+. Debian 12 repositories include Node 18.x.
+# --- 5. NODE.JS & PM2 ---
+# FreePBX 17 requires Node 18+ and PM2 process manager.
 log "Installing Node.js and NPM..."
 apt-get install -y nodejs npm || error "Failed to install Node.js"
 log "Node version installed: $(node -v)"
+
+log "Installing PM2 (Process Manager)..."
+npm install -g pm2@latest || error "Failed to install PM2"
 
 # --- 6. PRELIMINARY CONFIGURATION ---
 
@@ -79,10 +84,12 @@ systemctl restart apache2
 
 # Basic MariaDB Setup
 # Sets root password if not already set (simulates secure installation)
+# Force start required in some environments
+systemctl start mariadb
 if mysqladmin -u root password "$DB_ROOT_PASS" 2>/dev/null; then
     log "MariaDB root password set."
 else
     log "MariaDB root password already set or non-critical error."
 fi
 
-log "Environment preparation complete."
+log "Environment preparation complete. Ready for manual compilation."
