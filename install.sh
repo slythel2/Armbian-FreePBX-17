@@ -10,7 +10,7 @@
 
 # --- 1. USER CONFIGURATION ---
 # [IMPORTANT] UPDATE THIS URL WITH YOUR NEW V2 ARTIFACT (The one containing libraries!)
-ASTERISK_ARTIFACT_URL="https://github.com/slythel2/Armbian-FreePBX-17/releases/download/1.0/asterisk-21.12.0-arm64-debian12-v2.tar.gz"
+ASTERISK_ARTIFACT_URL="https://github.com/slythel2/FreePBX-17-for-Armbian-12-Bookworm/releases/download/1.0/asterisk-21.12.0-arm64-debian12-v2.tar.gz"
 
 # Database root password
 DB_ROOT_PASS="armbianpbx"
