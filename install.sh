@@ -9,7 +9,7 @@
 # ============================================================================
 
 # --- 1. USER CONFIGURATION ---
-ASTERISK_ARTIFACT_URL="https://github.com/slythel2/Armbian-FreePBX-17/releases/download/1.0/asterisk-21.12.0-arm64-debian12.tar.gz"
+ASTERISK_ARTIFACT_URL="https://github.com/slythel2/FreePBX-17-for-Armbian-12-Bookworm/releases/download/1.0/asterisk-21.12.0-arm64-debian12.tar.gz"
 
 # Database root password (auto-set)
 DB_ROOT_PASS="armbianpbx"
