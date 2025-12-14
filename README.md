@@ -12,6 +12,7 @@ You will also find a custom Armbian image in the **Releases** section of this re
 * **Status:** Heavy WIP. Not polished, but functional for this project.
 
 ## Features
+* **One Click Install** Every dependency Asterisk or FreePBX needs will be installed aswell.
 * **Fast Deployment:** Uses pre-compiled Asterisk 21 artifacts to skip long compilation times.
 * **Modern Stack:** Debian 12 (Bookworm), FreePBX 17, PHP 8.2.
 
