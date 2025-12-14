@@ -9,7 +9,7 @@ You will also find a custom Armbian image in the **Releases** section of this re
 * **Source:** Derived from ophub builds.
 * **Target:** T95 Max+ (Amlogic S905X3 SoC).
 * **Why:** I included a custom **auto-install script** that automatically corrects paths and selects the correct options and configurations specifically for this TV box.
-* **Status:** Heavy WIP. Not polished, but functional for this project.
+* **Status:** Heavy WIP. Not polished, but functional for this project **IF YOU HAVE EXACTLY THE SAME TV BOX**
 * **Features:** 2GB swap already configured.
 
 ## Features
