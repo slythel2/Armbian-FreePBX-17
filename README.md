@@ -14,12 +14,8 @@ You will also find a custom Armbian image in the **Releases** section of this re
 * **Status:** Heavy WIP. Not polished, but functional for this project **IF YOU HAVE EXACTLY THE SAME TV BOX**
 * **Features:** 2GB swap already configured.
 
-## Features
-* **One Click Install:** Every dependency Asterisk or FreePBX needs will be installed aswell.
-* **Fast Deployment:** Uses pre-compiled Asterisk 21 artifacts to skip long compilation times.
-* **Modern Stack:** Debian 12 (Bookworm), FreePBX 17, PHP 8.2.
-
-## Installation
+## FreePBX 17 & Asterisk 21 Installer
+# **Installation**
 Requires a clean Armbian (Debian 12 Bookworm ARM64) installation and root access.
 
 ```bash
@@ -27,6 +23,11 @@ wget https://raw.githubusercontent.com/slythel2/FreePBX-17-for-Armbian-12-Bookwo
 chmod +x install.sh
 ./install.sh
 ```
+## Features
+* **One Click Install:** Every dependency Asterisk or FreePBX needs will be installed aswell.
+* **Fast Deployment:** Uses pre-compiled Asterisk 21 artifacts to skip long compilation times.
+* **Modern Stack:** Debian 12 (Bookworm), FreePBX 17, PHP 8.2.
+
 
 Access
 Web Interface: http://<YOUR_IP>/admin
