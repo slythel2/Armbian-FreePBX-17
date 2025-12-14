@@ -36,10 +36,12 @@ Since this is based on Amlogic build, after the installation the toothpick metho
 You can still force USB boot by nuking the eMMC:
 
 ```bash
+{
 echo 0 > /sys/block/mmcblk2boot0/force_ro
 dd if=/dev/zero of=/dev/mmcblk2boot0 bs=1M count=1
 dd if=/dev/zero of=/dev/mmcblk2 bs=1M count=1
 sync
+}
 ```
 
 
