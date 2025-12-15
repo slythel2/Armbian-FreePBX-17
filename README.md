@@ -40,7 +40,7 @@ You will also find a custom Armbian image in the **Releases** section of this re
 # Instructions:
 1. Burn it with Rufus or BalenaEtcher on a USB stick or SD Card
 2. Remove the power cable, insert your USB stick/SD Card; there is a button at the bottom of the 3.5mm jack hole.
-3. With a toothpick, apply preessure on the button until you hear a click, insert the power cable, keep it pushed for 6-10 seconds.
+3. With a toothpick, apply pressure on the button until you hear a click, insert the power cable, keep the button pushed for 6-10 seconds.
 4. It will automatically install and power off by itself.
 5. Connect via ssh: root - 1234
 
