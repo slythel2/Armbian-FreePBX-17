@@ -46,6 +46,7 @@ You will also find a custom Armbian image in the **Releases** section of this re
 
 # Important note for the boot sequence of the TVBOX after installation:
 *Toothpick USB booting won't be usable anymore*
+
 SD card boot, though, should always be the priority and should boot as far as I know.
 You can still force USB boot by nuking the eMMC:
 
