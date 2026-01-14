@@ -44,15 +44,17 @@ You will also find a custom Armbian image in the **Releases** section of this re
 4. It will automatically install and power off by itself.
 5. Connect via ssh: root - 1234
 
-Note for T95 Max+
-
-SD card boot should always be the priority as far as I know.
-Since this is based on ophub Amlogic build, after the installation the toothpick method to boot up via USB won't be usable anymore.
+# Important note for the boot sequence of the TVBOX after installation:
+*Toothpick USB booting won't be usable anymore*
+SD card boot, though, should always be the priority and should boot as far as I know.
 You can still force USB boot by nuking the eMMC:
 
 ```bash
 dd if=/dev/zero of=/dev/mmcblk2 bs=1M count=1 && sync
 ```
+and /reboot right after
+
+
 
 Credits
 
