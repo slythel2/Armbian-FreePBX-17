@@ -3,9 +3,8 @@
 # ============================================================================
 # PROJECT:   Armbian PBX "One-Click" Installer (T95 Max+ / ARM64)
 # TARGET:    Debian 12 (Bookworm)
-# STACK:     Asterisk 21 (Pre-compiled) + FreePBX 17 + PHP 8.2
-# AUTHOR:    Gemini & slythel2
-# DATE:      2025-12-14 (V6.0)
+# STACK:     Asterisk 21 + FreePBX 17 + PHP 8.2
+# DATE:      2025-01-16 (v0.9.2)
 # ============================================================================
 
 # --- 1. USER CONFIGURATION ---
@@ -33,7 +32,7 @@ if [[ $EUID -ne 0 ]]; then echo "Run as root!"; exit 1; fi
 
 clear
 echo "========================================================"
-echo "   ARM64 PBX AUTO-INSTALLER (DEBIAN 12) V6.0            "
+echo "   ARM64 PBX AUTO-INSTALLER (DEBIAN 12) (v0.9.2)        "
 echo "========================================================"
 sleep 3
 
@@ -41,14 +40,14 @@ sleep 3
 log "Updating system and installing dependencies..."
 apt-get update && apt-get upgrade -y
 
-# Dependencies updated: added acl (Critical for permissions), pkg-config, libicu-dev, libedit2
+# Dependencies updated: added acl, pkg-config, libicu-dev, libedit2
 apt-get install -y \
-    git curl wget vim htop subversion sox pkg-config \
+    git curl wget vim htop subversion sox pkg-config sngrep \
     apache2 mariadb-server mariadb-client \
     libxml2 libsqlite3-0 libjansson4 libedit2 libxslt1.1 \
     libopus0 libvorbis0a libspeex1 libspeexdsp1 libgsm1 \
     unixodbc odbcinst libltdl7 libicu-dev \
-    nodejs npm acl sngrep \
+    nodejs npm acl \
     || error "Failed to install base packages"
 
 # CRITICAL FIX: Install PM2 explicitly (Required by FreePBX 17 process manager)
@@ -68,6 +67,8 @@ sed -i 's/memory_limit = .*/memory_limit = 256M/' /etc/php/8.2/apache2/php.ini
 sed -i 's/upload_max_filesize = .*/upload_max_filesize = 120M/' /etc/php/8.2/apache2/php.ini
 sed -i 's/post_max_size = .*/post_max_size = 120M/' /etc/php/8.2/apache2/php.ini
 sed -i 's/memory_limit = .*/memory_limit = 256M/' /etc/php/8.2/cli/php.ini
+# Fix timeout for Network Detect on slow networks
+sed -i 's/max_execution_time = .*/max_execution_time = 600/' /etc/php/8.2/apache2/php.ini
 
 # --- 4. ASTERISK USER SETUP ---
 log "Creating system user..."
@@ -144,6 +145,20 @@ log "Configuring Database..."
 systemctl start mariadb
 sleep 2
 
+# --- FIX: MARIADB STRICT MODE (CRITICAL FOR DEBIAN 12) ---
+# Disables Strict SQL Mode to prevent crashes when FreePBX writes partial data
+if [ ! -f /etc/mysql/conf.d/freepbx.cnf ]; then
+    log "Applying MariaDB 'Strict Mode' Fix..."
+    cat <<EOF > /etc/mysql/conf.d/freepbx.cnf
+[mysqld]
+sql_mode = ""
+innodb_strict_mode = 0
+EOF
+    systemctl restart mariadb
+    sleep 2
+fi
+# --------------------------------------------------------------
+
 mysqladmin -u root password "$DB_ROOT_PASS" 2>/dev/null || true
 
 mysql -u root -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS asterisk;"
@@ -172,57 +187,52 @@ log "Running FreePBX Installer..."
 # --- 9. PHP 8.2 CRITICAL COMPILATION FIXES ---
 log "Applying critical PHP 8.2 compilation patches..."
 
-# FIX 1: Less.php (array_merge fix) - Prevents TypeError on line 332/455
+# FIX 1: Less.php (array_merge fix)
 LESS_FILE="/var/www/html/admin/libraries/less/Less.php"
 if [ -f "$LESS_FILE" ]; then
-    # Patch for _parse: adds (array) cast before $this->GetRules
     sed -i 's/array_merge(\$this->rules, \$this->GetRules(\$file_path))/array_merge(\$this->rules, (array)\$this->GetRules(\$file_path))/' "$LESS_FILE"
-    # Patch for parse: adds (array) cast before $this->GetCachedVariable
     sed -i 's/\$this->GetCachedVariable(\$import))/(array)\$this->GetCachedVariable(\$import))/' "$LESS_FILE"
-    log "Patched Less.php (array_merge fix)."
-else
-    warn "WARNING: Less.php not found, skipping patch."
+    log "Patched Less.php."
 fi
 
-# FIX 2: Cache.php (int vs array fix) - Prevents 'compile() on int' error
+# FIX 2: Cache.php (int vs array fix)
 CACHE_FILE="/var/www/html/admin/libraries/less/Cache.php"
 if [ -f "$CACHE_FILE" ]; then
-    # Forces the return value from cache to always be an array
     sed -i "s/return \$value;/return (array)\$value;/" "$CACHE_FILE"
-    log "Patched Cache.php (int vs array fix)."
-else
-    warn "WARNING: Cache.php not found, skipping patch."
+    log "Patched Cache.php."
 fi
 
 # --- 10. MODULE MITIGATION & FINAL SETUP ---
-log "Finalizing configuration and mitigating unstable modules..."
+log "Finalizing configuration..."
 
-# 1. Remove modules known to cause dependency issues (Sysadmin/Firewall)
 fwconsole ma remove sysadmin || warn "Sysadmin not found/removed."
 fwconsole ma remove firewall || warn "Firewall not found/removed."
-
-# 2. Disable modules that cause compilation failures (DASHBOARD/UCP/SMS)
-# This is critical to ensure a successful initial fwconsole reload
 fwconsole ma disable dashboard || warn "Dashboard disabled."
 fwconsole ma disable sms || warn "SMS disabled."
 fwconsole ma disable ucp || warn "UCP disabled."
 
-# 3. Finalize installation and reload
+# --- FIX: SAFE SIP DEFAULTS (ANTI-CRASH) ---
+log "Enforcing Safe SIP Defaults (Prevents 'Detect Network' crashes)..."
+mysql -u root -p"$DB_ROOT_PASS" -D asterisk -e "UPDATE sipsettings SET data = 'no' WHERE keyword = 'nat';"
+mysql -u root -p"$DB_ROOT_PASS" -D asterisk -e "UPDATE sipsettings SET data = '0.0.0.0' WHERE keyword = 'bindaddr';"
+mysql -u root -p"$DB_ROOT_PASS" -D asterisk -e "UPDATE sipsettings SET data = '' WHERE keyword = 'externip';"
+mysql -u root -p"$DB_ROOT_PASS" -D asterisk -e "UPDATE sipsettings SET data = '' WHERE keyword = 'localnets';"
+# ------------------------------------------------
+
 fwconsole ma installall
 fwconsole chown
 rm -f /var/www/html/index.html
-
-# Cleanup final cache to force a clean compilation
 rm -rf /var/www/html/admin/assets/less/cache/*
 
 # --- 11. REBOOT-PROOF FIX (Systemd Service) ---
 log "Implementing systemd service for reboot-proof stability..."
 
-# Create a script that cleans and fixes permissions on every boot
 cat > /usr/local/bin/fix_free_perm.sh << EOF
 #!/bin/bash
-# Script to correct permissions on boot (essential on manual installs)
-fwconsole chown &>/dev/null
+# Script to correct permissions on boot
+# Also recreates volatile directories on Armbian
+mkdir -p /var/run/asterisk /var/log/asterisk
+chown -R asterisk:asterisk /var/run/asterisk /var/log/asterisk
 fwconsole chown &>/dev/null
 rm -rf /var/www/html/admin/assets/less/cache/*
 exit 0
@@ -230,7 +240,6 @@ EOF
 
 chmod +x /usr/local/bin/fix_free_perm.sh
 
-# Create a systemd service to execute the script on boot
 cat > /etc/systemd/system/free-perm-fix.service << EOF
 [Unit]
 Description=FreePBX Critical Permission Fix on Boot
@@ -250,18 +259,68 @@ systemctl daemon-reload
 systemctl enable free-perm-fix.service
 systemctl start free-perm-fix.service
 
-log "Systemd permission fix service enabled. The system is now reboot-proof."
+# --- 12. INSTALL SSH LOGIN BANNER (EMBEDDED) ---
+log "Generating Status Banner..."
 
-# --- 12. FINAL RELOAD AND USER INFO ---
+# Create the banner script directly (Self-contained, no wget dependency)
+cat << 'EOF' > /etc/update-motd.d/99-pbx-status
+#!/bin/bash
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Info
+UPTIME=$(uptime -p | cut -d " " -f 2-)
+IP_ADDR=$(hostname -I | cut -d' ' -f1)
+DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}')
+RAM_USAGE=$(free -m | awk 'NR==2 {printf "%.1f%%", $3*100/$2 }')
+
+# Status
+check_service() {
+    systemctl is-active --quiet $1 && echo -e "${GREEN}ONLINE${NC}" || echo -e "${RED}OFFLINE${NC}"
+}
+
+ASTERISK_STATUS=$(check_service asterisk)
+MARIADB_STATUS=$(check_service mariadb)
+APACHE_STATUS=$(check_service apache2)
+
+echo -e "${BLUE}"
+echo "================================================================"
+echo "   ARMBIAN PBX - ASTERISK 21 + FREEPBX 17 (ARM64)"
+echo "================================================================"
+echo -e "${NC}"
+echo -e " System IP:    ${YELLOW}$IP_ADDR${NC}"
+echo -e " Web GUI:      ${YELLOW}http://$IP_ADDR/admin${NC}"
+echo -e " Uptime:       $UPTIME"
+echo -e " Disk / RAM:   $DISK_USAGE / $RAM_USAGE"
+echo -e ""
+echo -e " Asterisk:     $ASTERISK_STATUS"
+echo -e " MariaDB:      $MARIADB_STATUS"
+echo -e " Apache Web:   $APACHE_STATUS"
+echo -e "${BLUE}"
+echo "================================================================"
+echo -e "${NC}"
+EOF
+
+chmod +x /etc/update-motd.d/99-pbx-status
+rm -f /etc/motd # Removes static motd to avoid duplication
+log "Banner installed successfully."
+
+# --- 13. FINAL RELOAD ---
 log "Performing final successful reload..."
-# This command MUST succeed due to the patches above
 fwconsole reload
 
 echo ""
 echo "========================================================"
-echo "   INSTALLATION COMPLETE! (V6.0 - RELOAD SUCCESS)       "
+echo "   INSTALLATION COMPLETE! (v0.9.2)        "
 echo "========================================================"
 echo "Web Access: http://$(hostname -I | cut -d' ' -f1)/admin"
+echo "--------------------------------------------------------"
 echo "DB Root Password: $DB_ROOT_PASS"
-echo "POST-INSTALL: The Dashboard is disabled for stability. Access the Web GUI."
+echo "--------------------------------------------------------"
+echo "NOTE: Configure NAT/IP Settings manually in the GUI."
+echo "      Follow the on-screen wizard to create your Admin User."
 echo "========================================================"
