@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${RED}========================================================${NC}"
-echo -e "${RED}   WARNING: TOTAL UNINSTALLATION SCRIPT (v0.5)            ${NC}"
+echo -e "${RED}   WARNING: TOTAL UNINSTALLATION SCRIPT (v0.5)          ${NC}"
 echo -e "${RED}========================================================${NC}"
 echo "This script will delete EVERYTHING related to PBX."
 echo ""
@@ -27,18 +27,16 @@ fi
 echo ""
 echo -e "${YELLOW}[1/9] Stopping services & Killing processes...${NC}"
 
-# 1. Kill FreePBX Console first (silently) to avoid DB connection errors
+# 1. Kill FreePBX Console first to avoid DB connection errors
 fwconsole stop &> /dev/null || true
 
-# 2. Stop Services in correct order
+# 2. Stop Services
 systemctl stop asterisk &> /dev/null
 systemctl stop freepbx &> /dev/null
 systemctl stop apache2 &> /dev/null
-# Stop DB last to avoid PHP exceptions if scripts are still running
 systemctl stop mariadb &> /dev/null
 
-# 3. Aggressive Process Kill (The "Silent Kill")
-# Redirects all output to null to keep terminal clean
+# 3. Aggressive Process Kill
 killall -9 asterisk &> /dev/null || true
 killall -9 safe_asterisk &> /dev/null || true
 pkill -u asterisk &> /dev/null || true
@@ -53,7 +51,6 @@ rm -f /usr/local/bin/fix_free_perm.sh
 systemctl daemon-reload
 
 echo -e "${YELLOW}[3/9] Deep Cleaning Directories...${NC}"
-# Remove directories manually
 rm -rf /etc/asterisk
 rm -rf /var/lib/asterisk
 rm -rf /var/log/asterisk
@@ -63,7 +60,7 @@ rm -rf /usr/lib/asterisk
 rm -rf /usr/sbin/asterisk
 rm -rf /var/www/html/* rm -rf /home/asterisk
 
-# Clean Logs & Configs for LAMP Stack explicitly
+# Clean Logs & Configs for LAMP Stack
 rm -rf /etc/apache2
 rm -rf /var/log/apache2
 rm -rf /var/lib/apache2
@@ -83,7 +80,6 @@ rm -rf /etc/npm
 rm -rf ~/.npm
 
 echo -e "${YELLOW}[6/9] Purging Main Packages...${NC}"
-# Use DEBIAN_FRONTEND=noninteractive and quiet flags
 DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq \
     apache2* \
     mariadb* \
@@ -102,11 +98,13 @@ echo -e "${YELLOW}[8/9] Cleaning up Package Manager...${NC}"
 apt-get autoremove -y &> /dev/null
 apt-get clean &> /dev/null
 
-# Final sweep 
+echo -e "${YELLOW}[9/9] Final Sweep...${NC}"
 rm -rf /etc/apache2 2>/dev/null
 rm -rf /etc/php 2>/dev/null
 rm -rf /etc/asterisk 2>/dev/null
 rm -rf /etc/mysql 2>/dev/null
+# Remove Status Banner
+rm -f /etc/update-motd.d/99-pbx-status 2>/dev/null
 
 echo -e "${GREEN}========================================================${NC}"
 echo -e "${GREEN}   SYSTEM CLEANED                                       ${NC}"
