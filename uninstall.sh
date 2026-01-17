@@ -2,13 +2,18 @@
 
 # FIX CRLF: Auto-correction for Windows line endings
 # If CR (\r) characters are detected, clean the file and restart.
+# This block must be header-safe to run even if the file has CRLF.
+(set -o igncr) 2>/dev/null && set -o igncr; # Cywin/MinGW workaround
+
 if grep -q $'\r' "$0"; then
+    echo "Windows line endings (CRLF) detected. Fixing..."
     sed -i 's/\r$//' "$0"
-    exec "$0" "$@"
+    echo "File fixed. Restarting script..."
+    exec bash "$0" "$@"
 fi
 
 # ============================================================================
-# SCRIPT: uninstall.sh (v0.6)
+# SCRIPT: uninstall.sh (v0.6.1)
 # PURPOSE: COMPLETELY remove Asterisk, FreePBX, LAMP stack
 # TARGET:  Armbian 12
 # ============================================================================
@@ -20,7 +25,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${RED}========================================================${NC}"
-echo -e "${RED}   WARNING: FREEPBX UNINSTALLATION SCRIPT (v0.6)            ${NC}"
+echo -e "${RED}   WARNING: FREEPBX UNINSTALLATION SCRIPT (v0.6.1)          ${NC}"
 echo -e "${RED}========================================================${NC}"
 echo "This script will delete EVERYTHING related to PBX."
 echo ""
