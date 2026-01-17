@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# FIX CRLF: Auto-correction for Windows line endings
+# If CR (\r) characters are detected, clean the file and restart.
+if grep -q $'\r' "$0"; then
+    sed -i 's/\r$//' "$0"
+    exec "$0" "$@"
+fi
+
 # ============================================================================
 # SCRIPT: uninstall.sh (v0.6)
 # PURPOSE: COMPLETELY remove Asterisk, FreePBX, LAMP stack
