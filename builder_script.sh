@@ -18,17 +18,37 @@ DEBIAN_FRONTEND=noninteractive
 echo ">>> [BUILDER] Starting build for version: $ASTERISK_VER"
 
 # 1. Install Build Dependencies (inside the container)
-# ADDED: autoconf, automake, libtool to fix bundled PJProject compilation errors
 echo ">>> [BUILDER] Installing dependencies..."
-apt-get update -qq
-apt-get install -y -qq \
-    git curl wget build-essential subversion pkg-config \
+export DEBIAN_FRONTEND=noninteractive
+
+# For debugging, avoid -qq so we can see any package install failures in the logs.
+apt-get update
+
+# Install explicit libc dev packages and compilers in addition to build-essential
+apt-get install -y --no-install-recommends \
+    build-essential libc6-dev linux-libc-dev gcc g++ \
+    git curl wget subversion pkg-config \
     autoconf automake libtool binutils \
     libncurses5-dev libncursesw5-dev libxml2-dev libsqlite3-dev \
     libssl-dev uuid-dev libjansson-dev libedit-dev libxslt1-dev \
     libicu-dev libsrtp2-dev libopus-dev libvorbis-dev libspeex-dev \
     libspeexdsp-dev libgsm1-dev portaudio19-dev \
     unixodbc unixodbc-dev odbcinst libltdl-dev
+
+# Verification/debugging: ensure headers and compiler exist
+echo ">>> [BUILDER] Verifying toolchain and headers..."
+gcc --version || true
+g++ --version || true
+ls -l /usr/include/sys/socket.h || true
+dpkg -l libc6-dev linux-libc-dev build-essential || true
+
+if [ ! -f /usr/include/sys/socket.h ]; then
+    echo ">>> [BUILDER][ERROR] /usr/include/sys/socket.h not present. Reinstalling libc6-dev..."
+    apt-get install -y --reinstall libc6-dev linux-libc-dev || {
+        echo ">>> [BUILDER][FATAL] Reinstall failed. See previous apt output."
+        exit 1
+    }
+fi
 
 mkdir -p $BUILD_DIR
 cd $BUILD_DIR
