@@ -47,14 +47,15 @@ contrib/scripts/get_mp3_source.sh
 
 # 4. Configuration
 echo ">>> [BUILDER] Configuring..."
-# FIX: Added CFLAGS='-g -O1' to prevent QEMU/GCC segmentation faults.
-# Optimization -O2 often crashes QEMU on complex C++ files.
+# FIX 1: ac_cv_func_strtoq=yes forces detection of strtoq to avoid redefinition conflict in compat.h
+# FIX 2: CFLAGS='-g -O0' completely disables optimization to prevent QEMU segfaults
 ./configure --libdir=/usr/lib \
     --with-pjproject-bundled \
     --without-x11 \
     --without-gtk2 \
-    CFLAGS='-g -O1' \
-    CXXFLAGS='-g -O1'
+    ac_cv_func_strtoq=yes \
+    CFLAGS='-g -O0' \
+    CXXFLAGS='-g -O0'
 
 # 5. Module Selection
 echo ">>> [BUILDER] Selecting modules..."
