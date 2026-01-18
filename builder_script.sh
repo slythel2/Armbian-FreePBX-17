@@ -17,15 +17,12 @@ DEBIAN_FRONTEND=noninteractive
 
 echo ">>> [BUILDER] Starting build for version: $ASTERISK_VER"
 
-# 1. Install Build Dependencies (inside the container)
+# 1. Install Build Dependencies
 echo ">>> [BUILDER] Installing dependencies..."
-export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
 
-# For debugging, avoid -qq so we can see any package install failures in the logs.
-apt-get update
-
-# Install explicit libc dev packages and compilers in addition to build-essential
-apt-get install -y --no-install-recommends \
+# Added libsystemd-dev for better systemd integration
+apt-get install -y -qq --no-install-recommends \
     build-essential libc6-dev linux-libc-dev gcc g++ \
     git curl wget subversion pkg-config \
     autoconf automake libtool binutils \
@@ -33,22 +30,7 @@ apt-get install -y --no-install-recommends \
     libssl-dev uuid-dev libjansson-dev libedit-dev libxslt1-dev \
     libicu-dev libsrtp2-dev libopus-dev libvorbis-dev libspeex-dev \
     libspeexdsp-dev libgsm1-dev portaudio19-dev \
-    unixodbc unixodbc-dev odbcinst libltdl-dev
-
-# Verification/debugging: ensure headers and compiler exist
-echo ">>> [BUILDER] Verifying toolchain and headers..."
-gcc --version || true
-g++ --version || true
-ls -l /usr/include/sys/socket.h || true
-dpkg -l libc6-dev linux-libc-dev build-essential || true
-
-if [ ! -f /usr/include/sys/socket.h ]; then
-    echo ">>> [BUILDER][ERROR] /usr/include/sys/socket.h not present. Reinstalling libc6-dev..."
-    apt-get install -y --reinstall libc6-dev linux-libc-dev || {
-        echo ">>> [BUILDER][FATAL] Reinstall failed. See previous apt output."
-        exit 1
-    }
-fi
+    unixodbc unixodbc-dev odbcinst libltdl-dev libsystemd-dev
 
 mkdir -p $BUILD_DIR
 cd $BUILD_DIR
@@ -63,40 +45,18 @@ rm asterisk.tar.gz
 echo ">>> [BUILDER] Downloading MP3 resources..."
 contrib/scripts/get_mp3_source.sh
 
-# 4. Configuration - verify headers first and clear autoconf cache
-echo ">>> [BUILDER] Verifying presence of network headers..."
-# Check both headers
-if [ ! -f /usr/include/netinet/in.h ] || [ ! -f /usr/include/sys/socket.h ]; then
-    echo ">>> [BUILDER][WARN] One or more required headers missing:"
-    [ -f /usr/include/netinet/in.h ] || echo "  - /usr/include/netinet/in.h (missing)"
-    [ -f /usr/include/sys/socket.h ] || echo "  - /usr/include/sys/socket.h (missing)"
-
-    echo ">>> [BUILDER] Reinstalling libc headers..."
-    apt-get update
-    apt-get install -y --no-install-recommends --reinstall libc6-dev linux-libc-dev || {
-        echo ">>> [BUILDER][FATAL] Reinstall of libc headers failed. See apt output above."
-        exit 1
-    }
-
-    # re-check after reinstall
-    if [ ! -f /usr/include/netinet/in.h ] || [ ! -f /usr/include/sys/socket.h ]; then
-        echo ">>> [BUILDER][FATAL] Headers still missing after reinstall."
-        ls -R /usr/include | sed -n '1,200p'
-        exit 1
-    fi
-fi
-
-# Show compiler include search path for debugging
-echo ">>> [BUILDER] Compiler include search paths (for diagnostics):"
-echo | gcc -E -x c - -v 2>&1 | sed -n '/#include <...> search starts here:/,/#include <...> search ends here:/p'
-
-# Remove any autoconf cache to avoid "(cached) no" results from earlier runs
-rm -f config.cache config.log || true
-
+# 4. Configuration
 echo ">>> [BUILDER] Configuring..."
-./configure --libdir=/usr/lib --with-pjproject-bundled --without-x11 --without-gtk2
+# FIX: Added CFLAGS='-g -O1' to prevent QEMU/GCC segmentation faults.
+# Optimization -O2 often crashes QEMU on complex C++ files.
+./configure --libdir=/usr/lib \
+    --with-pjproject-bundled \
+    --without-x11 \
+    --without-gtk2 \
+    CFLAGS='-g -O1' \
+    CXXFLAGS='-g -O1'
 
-# 5. Module Selection (Headless)
+# 5. Module Selection
 echo ">>> [BUILDER] Selecting modules..."
 make menuselect.makeopts
 menuselect/menuselect --enable format_mp3 menuselect.makeopts
@@ -104,21 +64,20 @@ menuselect/menuselect --enable CORE-SOUNDS-EN-WAV menuselect.makeopts
 menuselect/menuselect --enable CORE-SOUNDS-EN-ULAW menuselect.makeopts
 menuselect/menuselect --enable CORE-SOUNDS-EN-ALAW menuselect.makeopts
 menuselect/menuselect --enable CORE-SOUNDS-EN-GSM menuselect.makeopts
-# Disable BUILD_NATIVE to prevent CPU instruction errors on different ARM chips
 menuselect/menuselect --disable BUILD_NATIVE menuselect.makeopts
 
 # 6. Compilation
-# MODIFIED: Limited to -j2 to prevent race conditions/crashes in QEMU emulation
-echo ">>> [BUILDER] Compiling (Limited to 2 cores for stability)..."
-make -j2
+# FIX: Forced -j1. Multi-threading in QEMU builds causes memory corruption/segfaults.
+echo ">>> [BUILDER] Compiling (Single core mode for stability)..."
+make -j1
 
-# 7. Install to temporary directory (Staging)
+# 7. Install to Staging
 echo ">>> [BUILDER] Creating installation structure..."
 make install DESTDIR=$BUILD_DIR/staging
 make samples DESTDIR=$BUILD_DIR/staging
 make config DESTDIR=$BUILD_DIR/staging
 
-# 8. Artifact Creation (.tar.gz)
+# 8. Artifact Creation
 echo ">>> [BUILDER] Final packaging..."
 cd $BUILD_DIR/staging
 TAR_NAME="asterisk-${ASTERISK_VER}-arm64-debian12.tar.gz"
