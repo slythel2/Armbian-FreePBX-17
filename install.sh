@@ -3,7 +3,7 @@
 # ============================================================================
 # PROJECT:   Armbian PBX Installer (Asterisk 22 + FreePBX 17)
 # TARGET:    Armbian 12 Bookworm (ARM64 - s905x3)
-# VERSION:   2.9 (Fresh Install Reliability Fix)
+# VERSION:   3.0 (Fresh Install & Webroot Hardening)
 # ============================================================================
 
 # --- 1. CONFIGURATION ---
@@ -52,17 +52,19 @@ if [[ "$1" == "--update" ]]; then
     systemctl start asterisk
     
     log "Update completed. Running FreePBX reload..."
-    fwconsole reload
+    if command -v fwconsole &> /dev/null; then
+        fwconsole reload
+    fi
     exit 0
 fi
 
 # --- 2. MAIN INSTALLER (FRESH) ---
 clear
 echo "========================================================"
-echo "   ARMBIAN PBX INSTALLER v2.9 (Asterisk 22 LTS)         "
+echo "   ARMBIAN PBX INSTALLER v3.0 (Asterisk 22 LTS)         "
 echo "========================================================"
 
-log "System upgrade and dependencies..."
+log "System upgrade and core dependencies..."
 apt-get update && apt-get upgrade -y
 apt-get install -y \
     git curl wget vim htop subversion sox pkg-config sngrep \
@@ -76,75 +78,35 @@ apt-get install -y \
     php-mysql php-soap php-xml php-intl php-zip php-bcmath \
     php-ldap php-pear libapache2-mod-php
 
-# PHP Tuning
+# PHP Optimization
 for INI in /etc/php/8.2/apache2/php.ini /etc/php/8.2/cli/php.ini; do
     if [ -f "$INI" ]; then
         sed -i 's/^memory_limit = .*/memory_limit = 512M/' "$INI"
         sed -i 's/^upload_max_filesize = .*/upload_max_filesize = 120M/' "$INI"
         sed -i 's/^post_max_size = .*/post_max_size = 120M/' "$INI"
+        sed -i 's/^;date.timezone =.*/date.timezone = UTC/' "$INI"
     fi
 done
 
 # --- 3. ASTERISK USER & ARTIFACT ---
-log "Setting up Asterisk user and artifact..."
+log "Configuring Asterisk user..."
 getent group asterisk >/dev/null || groupadd asterisk
 if ! getent passwd asterisk >/dev/null; then
     useradd -r -d /var/lib/asterisk -s /bin/bash -g asterisk asterisk
     usermod -aG audio,dialout,www-data asterisk
 fi
 
+log "Downloading Asterisk artifact..."
 wget -q -O /tmp/asterisk.tar.gz "$FALLBACK_ARTIFACT"
-log "Extracting Asterisk artifact to root..."
 tar -xzf /tmp/asterisk.tar.gz -C /
 rm /tmp/asterisk.tar.gz
 
-# Mandatory folders
-mkdir -p /var/run/asterisk /var/log/asterisk /var/lib/asterisk /var/spool/asterisk /etc/asterisk
-chown -R asterisk:asterisk /var/run/asterisk /var/log/asterisk /var/lib/asterisk /var/spool/asterisk /etc/asterisk /usr/lib/asterisk
+# Ensure all directories exist
+mkdir -p /var/run/asterisk /var/log/asterisk /var/lib/asterisk /var/spool/asterisk /etc/asterisk /usr/lib/asterisk/modules
+chown -R asterisk:asterisk /var/run/asterisk /var/log/asterisk /var/lib/asterisk /var/spool/asterisk /etc/asterisk
 ldconfig
 
-# Systemd Service
-cat > /etc/systemd/system/asterisk.service <<'EOF'
-[Unit]
-Description=Asterisk PBX
-After=network.target mariadb.service
-[Service]
-Type=simple
-User=asterisk
-Group=asterisk
-ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf
-Restart=always
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable asterisk mariadb apache2
-
-# --- 4. DATABASE & APACHE ---
-log "Starting MariaDB..."
-systemctl start mariadb
-mysqladmin -u root password "$DB_ROOT_PASS" 2>/dev/null || true
-
-mysql -u root -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS asterisk; CREATE DATABASE IF NOT EXISTS asteriskcdrdb;"
-mysql -u root -p"$DB_ROOT_PASS" -e "GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS';"
-mysql -u root -p"$DB_ROOT_PASS" -e "GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'localhost';"
-mysql -u root -p"$DB_ROOT_PASS" -e "FLUSH PRIVILEGES;"
-
-log "Configuring Apache for FreePBX..."
-sed -i 's/^\(User\|Group\).*/\1 asterisk/' /etc/apache2/apache2.conf
-a2enmod rewrite
-systemctl restart apache2
-
-# --- 5. START ASTERISK BEFORE FREEPBX ---
-log "Starting Asterisk to allow FreePBX installation..."
-systemctl restart asterisk
-sleep 5
-
-# Verify asterisk.conf exists (Fix for the error you saw)
-if [ ! -f /etc/asterisk/asterisk.conf ]; then
-    log "Creating basic asterisk.conf..."
-    /usr/sbin/asterisk -V # Helps trigger basic paths
+# Create a clean asterisk.conf (CRITICAL)
 cat > /etc/asterisk/asterisk.conf <<'EOF'
 [directories]
 astetcdir => /etc/asterisk
@@ -158,11 +120,85 @@ astspooldir => /var/spool/asterisk
 astrundir => /var/run/asterisk
 astlogdir => /var/log/asterisk
 [options]
+runuser = asterisk
+rungroup = asterisk
 EOF
-    chown asterisk:asterisk /etc/asterisk/asterisk.conf
+chown asterisk:asterisk /etc/asterisk/asterisk.conf
+
+# Systemd Service Fix
+cat > /etc/systemd/system/asterisk.service <<'EOF'
+[Unit]
+Description=Asterisk PBX
+After=network.target mariadb.service
+[Service]
+Type=simple
+User=asterisk
+Group=asterisk
+ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable asterisk mariadb apache2
+
+# --- 4. DATABASE SETUP ---
+log "Initializing MariaDB..."
+systemctl start mariadb
+mysqladmin -u root password "$DB_ROOT_PASS" 2>/dev/null || true
+
+mysql -u root -p"$DB_ROOT_PASS" -e "CREATE DATABASE IF NOT EXISTS asterisk; CREATE DATABASE IF NOT EXISTS asteriskcdrdb;"
+mysql -u root -p"$DB_ROOT_PASS" -e "GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'localhost' IDENTIFIED BY '$DB_ROOT_PASS';"
+mysql -u root -p"$DB_ROOT_PASS" -e "GRANT ALL PRIVILEGES ON asteriskcdrdb.* TO 'asterisk'@'localhost';"
+mysql -u root -p"$DB_ROOT_PASS" -e "FLUSH PRIVILEGES;"
+
+# --- 5. APACHE CONFIGURATION ---
+log "Hardening Apache configuration..."
+# Update DocumentRoot block to allow .htaccess
+cat > /etc/apache2/sites-available/freepbx.conf <<EOF
+<VirtualHost *:80>
+    ServerAdmin webmaster@localhost
+    DocumentRoot /var/www/html
+    <Directory /var/www/html>
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    ErrorLog \${APACHE_LOG_DIR}/error.log
+    CustomLog \${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>
+EOF
+
+sed -i 's/^\(User\|Group\).*/\1 asterisk/' /etc/apache2/apache2.conf
+a2enmod rewrite
+a2ensite freepbx.conf
+a2dissite 000-default.conf
+systemctl restart apache2
+
+# --- 6. START ASTERISK BEFORE FREEPBX ---
+log "Starting Asterisk and waiting for readiness..."
+systemctl restart asterisk
+sleep 5
+
+# Validation loop
+ASTERISK_READY=0
+for i in {1..10}; do
+    if asterisk -rx "core show version" &>/dev/null; then
+        ASTERISK_READY=1
+        log "Asterisk is responding to CLI."
+        break
+    fi
+    warn "Waiting for Asterisk... ($i/10)"
+    sleep 3
+done
+
+if [ $ASTERISK_READY -eq 0 ]; then
+    error "Asterisk failed to respond. Check /var/log/asterisk/messages"
 fi
 
-# --- 6. FREEPBX INSTALLATION ---
+# --- 7. FREEPBX INSTALLATION ---
 log "Installing FreePBX 17..."
 cd /usr/src
 wget -q http://mirror.freepbx.org/modules/packages/freepbx/freepbx-17.0-latest.tgz
@@ -170,22 +206,75 @@ tar xfz freepbx-17.0-latest.tgz
 cd freepbx
 ./install -n --dbuser asterisk --dbpass "$DB_ROOT_PASS" --webroot /var/www/html --user asterisk --group asterisk
 
-# --- 7. FINAL FIXES ---
-log "Applying web interface and permission fixes..."
-fwconsole chown
-fwconsole reload
-
-# Re-link mysql socket
+# --- 8. FINAL FIXES ---
+log "Finalizing permissions and CDR setup..."
 REAL_SOCKET=$(find /run /var/run -name mysqld.sock 2>/dev/null | head -n 1)
 [ -n "$REAL_SOCKET" ] && ln -sf "$REAL_SOCKET" /tmp/mysql.sock
 
-# Banner
+# ODBC Fix (Needs variables expansion)
+ODBC_DRIVER=$(find /usr/lib -name "libmaodbc.so" | head -n 1)
+if [ -n "$ODBC_DRIVER" ]; then
+cat > /etc/odbcinst.ini <<EOF
+[MariaDB]
+Description=ODBC for MariaDB
+Driver=$ODBC_DRIVER
+Setup=$ODBC_DRIVER
+UsageCount=1
+EOF
+
+cat > /etc/odbc.ini <<EOF
+[MySQL-asteriskcdrdb]
+Description=MySQL connection to 'asteriskcdrdb' database
+Driver=MariaDB
+Server=localhost
+Database=asteriskcdrdb
+Port=3306
+Socket=$REAL_SOCKET
+Option=3
+EOF
+fi
+
+if command -v fwconsole &> /dev/null; then
+    fwconsole chown
+    fwconsole ma remove firewall 2>/dev/null
+    fwconsole reload
+fi
+
+# Persistence Service
+cat > /usr/local/bin/fix_free_perm.sh <<'EOF'
+#!/bin/bash
+DYN_SOCKET=$(find /run /var/run -name mysqld.sock 2>/dev/null | head -n 1)
+[ -n "$DYN_SOCKET" ] && ln -sf "$DYN_SOCKET" /tmp/mysql.sock
+mkdir -p /var/run/asterisk /var/log/asterisk
+chown -R asterisk:asterisk /var/run/asterisk /var/log/asterisk /var/lib/asterisk /etc/asterisk
+if [ -x /usr/sbin/fwconsole ]; then
+    /usr/sbin/fwconsole chown &>/dev/null
+fi
+exit 0
+EOF
+chmod +x /usr/local/bin/fix_free_perm.sh
+
+cat > /etc/systemd/system/free-perm-fix.service <<'EOF'
+[Unit]
+Description=FreePBX Permission Fix
+After=asterisk.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/fix_free_perm.sh
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl enable free-perm-fix.service
+
+# MOTD Banner
 cat > /etc/update-motd.d/99-pbx-status <<'EOF'
 #!/bin/bash
+BLUE='\033[0;34m'
+NC='\033[0m'
 IP_ADDR=$(hostname -I | cut -d' ' -f1)
-echo -e "\e[34m================================================================\e[0m"
+echo -e "${BLUE}================================================================${NC}"
 echo -e "   ARMBIAN PBX - Web GUI: http://$IP_ADDR/admin"
-echo -e "\e[34m================================================================\e[0m"
+echo -e "${BLUE}================================================================${NC}"
 EOF
 chmod +x /etc/update-motd.d/99-pbx-status
 
