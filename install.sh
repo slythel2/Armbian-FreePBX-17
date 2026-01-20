@@ -44,7 +44,8 @@ if [[ "$1" == "--update" ]]; then
     log "Stopping Asterisk..."
     systemctl stop asterisk
     sleep 2
-    killall -9 asterisk 2>/dev/null
+    # Force kill only if necessary
+    pkill -9 asterisk 2>/dev/null
     
     log "Detecting latest Asterisk artifact..."
     if ! command -v jq &> /dev/null; then
@@ -69,11 +70,31 @@ if [[ "$1" == "--update" ]]; then
     cd /tmp
     wget -O asterisk_update.tar.gz "$ASTERISK_ARTIFACT_URL" || error "Download failed."
     
-    log "Installing update..."
-    tar -xzvf asterisk_update.tar.gz -C /
+    log "Installing update (Binaries & Modules ONLY)..."
+    # Protects existing FreePBX configurations
+    tar -xzvf asterisk_update.tar.gz -C / \
+        --exclude='etc/asterisk' \
+        --exclude='var/lib/asterisk/astdb' \
+        --exclude='var/spool/asterisk' \
+        --keep-directory-symlink
+        
     rm asterisk_update.tar.gz
     
-    chown -R asterisk:asterisk /usr/lib/asterisk /var/lib/asterisk
+    log "Fixing Permissions & Libraries..."
+    # Rebuilds library cache (in case the update brings new libs)
+    ldconfig
+    
+    # Recursive permission fix on all Asterisk directories
+    chown -R asterisk:asterisk \
+        /usr/lib/asterisk \
+        /var/lib/asterisk \
+        /var/spool/asterisk \
+        /var/log/asterisk \
+        /etc/asterisk \
+        /var/run/asterisk 2>/dev/null
+
+    # MIGHT WANNA REMOVE Force permissions on SQLite files too to solve 'declined to load' warnings
+    find /var/lib/asterisk -name "*.sqlite3" -exec chmod 664 {} \;
     
     log "Restarting Asterisk..."
     systemctl start asterisk
@@ -87,7 +108,11 @@ if [[ "$1" == "--update" ]]; then
     done
     
     if systemctl is-active --quiet asterisk; then
-        log "Asterisk updated successfully."
+        log "Asterisk updated successfully. Reloading FreePBX configs..."
+        # Reload FreePBX core
+        if command -v fwconsole &> /dev/null; then
+            fwconsole reload
+        fi
         exit 0
     else
         error "Asterisk failed to start after update. Check logs."
