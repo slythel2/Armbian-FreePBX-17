@@ -1,8 +1,6 @@
 #!/bin/bash
 
 # FIX CRLF: Auto-correction for Windows line endings
-# If CR (\r) characters are detected, clean the file and restart.
-# This block must be header-safe to run even if the file has CRLF.
 (set -o igncr) 2>/dev/null && set -o igncr; # Cywin/MinGW workaround
 
 if grep -q $'\r' "$0"; then
@@ -13,7 +11,7 @@ if grep -q $'\r' "$0"; then
 fi
 
 # ============================================================================
-# SCRIPT: uninstall.sh (v0.6.1)
+# SCRIPT: uninstall.sh (v0.2.2)
 # PURPOSE: COMPLETELY remove Asterisk, FreePBX, LAMP stack
 # TARGET:  Armbian 12
 # ============================================================================
@@ -25,7 +23,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${RED}========================================================${NC}"
-echo -e "${RED}   WARNING: FREEPBX UNINSTALLATION SCRIPT (v0.6.1)          ${NC}"
+echo -e "${RED}      WARNING: FREEPBX UNINSTALLATION SCRIPT            ${NC}"
 echo -e "${RED}========================================================${NC}"
 echo "This script will delete EVERYTHING related to PBX."
 echo ""
@@ -37,6 +35,27 @@ if [[ "$confirm" != "yes" ]]; then
 fi
 
 echo ""
+echo -e "${YELLOW}[0/9] Pre-cleanup Safety Checks...${NC}"
+
+# Verify D-Bus is running (CRITICAL for NetworkManager)
+if ! systemctl is-active --quiet dbus 2>/dev/null; then
+    echo -e "${RED}ERROR: D-Bus is not running! This will break NetworkManager.${NC}"
+    echo "Fix D-Bus first before running this script."
+    exit 1
+fi
+echo "✓ D-Bus is running"
+
+# Backup NetworkManager config (if exists)
+if systemctl is-active --quiet NetworkManager 2>/dev/null; then
+    echo "✓ NetworkManager detected - creating backup..."
+    mkdir -p /tmp/nm_backup
+    cp -r /etc/NetworkManager /tmp/nm_backup/ 2>/dev/null || true
+fi
+
+# Save list of D-Bus related packages (DO NOT REMOVE THESE)
+DBUS_PACKAGES=$(dpkg -l | grep -E 'dbus|glib|libgio' | awk '{print $2}' | tr '\n' ' ')
+echo "Protected packages: D-Bus and dependencies"
+
 echo -e "${YELLOW}[1/9] Stopping services & Killing processes...${NC}"
 
 # 1. Kill FreePBX Console first to avoid DB connection errors
@@ -70,13 +89,12 @@ rm -rf /var/spool/asterisk
 rm -rf /var/run/asterisk
 rm -rf /usr/lib/asterisk
 rm -rf /usr/sbin/asterisk
-rm -rf /var/www/html/* rm -rf /home/asterisk
+rm -rf /var/www/html/*
+rm -rf /home/asterisk
 
 # Clean Logs & Configs for LAMP Stack
-rm -rf /etc/apache2
 rm -rf /var/log/apache2
 rm -rf /var/lib/apache2
-rm -rf /etc/php
 rm -rf /var/lib/php
 rm -rf /var/lib/mysql
 rm -rf /var/log/mysql
@@ -85,40 +103,72 @@ echo -e "${YELLOW}[4/9] Removing Users and Groups...${NC}"
 deluser --remove-home asterisk &> /dev/null || true
 delgroup asterisk &> /dev/null || true
 
-echo -e "${YELLOW}[5/9] Removing NodeJS & PM2...${NC}"
-npm uninstall -g pm2 &> /dev/null
-rm -rf /usr/lib/node_modules
+echo -e "${YELLOW}[5/9] Removing NodeJS artifacts (safe mode)...${NC}"
+# Don't purge nodejs/npm as they may have system-wide dependencies
+# Just clean up project-specific installations
+npm uninstall -g pm2 &>/dev/null || true
+rm -rf /usr/lib/node_modules/pm2 2>/dev/null || true
 rm -rf /etc/npm
 rm -rf ~/.npm
 
-echo -e "${YELLOW}[6/9] Purging Main Packages...${NC}"
+echo -e "${YELLOW}[6/9] Purging PBX Packages Only (Network-Safe)...${NC}"
+# Only remove PBX-specific packages, not nodejs/npm to preserve system dependencies
 DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq \
-    apache2* \
-    mariadb* \
-    php* \
-    nodejs npm \
-    unixodbc* odbcinst* \
-    libasterisk* \
-    xmlstarlet &> /dev/null
+    apache2 apache2-bin apache2-data apache2-utils \
+    mariadb-server mariadb-client mariadb-common \
+    php-cli php-common php-curl php-gd php-mbstring php-mysql \
+    php-soap php-xml php-intl php-zip php-bcmath php-ldap php-pear \
+    libapache2-mod-php php8.2-cli php8.2-common php8.2-curl \
+    php8.2-gd php8.2-mbstring php8.2-mysql php8.2-xml \
+    unixodbc unixodbc-dev odbcinst \
+    xmlstarlet 2>&1 | grep -v "unable to locate package" || true
 
-echo -e "${YELLOW}[7/9] Removing Dependency Libraries...${NC}"
-DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq \
-    libopus0 libvorbis0a libspeex1 libspeexdsp1 libgsm1 \
-    libltdl7 libicu-dev &> /dev/null
-
-echo -e "${YELLOW}[8/9] Cleaning up Package Manager...${NC}"
-apt-get autoremove -y &> /dev/null
+echo -e "${YELLOW}[7/8] Cleaning up Package Manager...${NC}"
 apt-get clean &> /dev/null
 
-echo -e "${YELLOW}[9/9] Final Sweep...${NC}"
-rm -rf /etc/apache2 2>/dev/null
-rm -rf /etc/php 2>/dev/null
-rm -rf /etc/asterisk 2>/dev/null
-rm -rf /etc/mysql 2>/dev/null
+echo -e "${YELLOW}[8/8] Final Sweep...${NC}"
+# Clean any residual config directories left by apt purge
+rm -rf /etc/apache2 2>/dev/null || true
+rm -rf /etc/php 2>/dev/null || true
+rm -rf /etc/asterisk 2>/dev/null || true
+rm -rf /etc/mysql 2>/dev/null || true
 # Remove Status Banner
-rm -f /etc/update-motd.d/99-pbx-status 2>/dev/null
+rm -f /etc/update-motd.d/99-pbx-status 2>/dev/null || true
 
 echo -e "${GREEN}========================================================${NC}"
 echo -e "${GREEN}   SYSTEM CLEANED                                       ${NC}"
 echo -e "${GREEN}========================================================${NC}"
+
+# Post-cleanup verification
+echo ""
+echo "Verifying critical services..."
+
+# Check D-Bus
+if systemctl is-active --quiet dbus 2>/dev/null; then
+    echo -e "${GREEN}✓ D-Bus is still running${NC}"
+else
+    echo -e "${RED}✗ D-Bus FAILED - NetworkManager will not work!${NC}"
+    echo "Recovery: sudo systemctl restart dbus"
+    exit 1
+fi
+
+# Check NetworkManager
+if systemctl is-active --quiet NetworkManager 2>/dev/null; then
+    echo -e "${GREEN}✓ NetworkManager is still running${NC}"
+    
+    # Query NetworkManager via D-Bus
+    if nmcli -t -f STATE general 2>/dev/null | grep -q "connected\|connecting"; then
+        echo -e "${GREEN}✓ NetworkManager is responding via D-Bus${NC}"
+    else
+        echo -e "${YELLOW}⚠ NetworkManager running but may have D-Bus issues${NC}"
+        echo "Test with: nmcli device status"
+    fi
+else
+    echo -e "${YELLOW}⚠ NetworkManager status unknown${NC}"
+    if [ -d "/tmp/nm_backup" ]; then
+        echo "Backup available at: /tmp/nm_backup"
+    fi
+fi
+
+echo ""
 echo "Reboot recommended."
