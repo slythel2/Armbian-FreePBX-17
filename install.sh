@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================
-# PROJECT:   Armbian PBX Installer (Asterisk 22 + FreePBX 17 + LAMP) v0.4.1
+# PROJECT:   Armbian PBX Installer (Asterisk 22 + FreePBX 17 + LAMP) v0.4.3
 # TARGET:    Debian 12 Bookworm ARM64
 # ============================================================================
 
