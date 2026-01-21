@@ -8,7 +8,8 @@ on:
         required: true
         default: '22-current'
   schedule:
-    - cron: '0 0 1 * *'
+    # Runs every 2 months (approx 8-9 weeks) - aligned with Asterisk 22 LTS release cycle
+    - cron: '0 0 1 */2 *'
 
 permissions:
   contents: write
