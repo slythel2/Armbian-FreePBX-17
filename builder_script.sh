@@ -63,6 +63,11 @@ echo ">>> [BUILDER] Configuring..."
     --without-x11 \
     --without-gtk2
 
+# Extract actual Asterisk version from configure output
+REAL_VERSION=$(grep 'PACKAGE_VERSION' config.log | head -n1 | cut -d"'" -f2 || echo "unknown")
+echo ">>> [BUILDER] Detected Asterisk version: $REAL_VERSION"
+echo "$REAL_VERSION" > /tmp/asterisk_version.txt
+
 # --- 5. CLEAN & SELECT ---
 make -C third-party/pjproject clean || true
 
@@ -89,6 +94,11 @@ mkdir -p "$BUILD_DIR/staging/etc/default"
 mkdir -p "$BUILD_DIR/staging/usr/lib/systemd/system"
 
 make config DESTDIR=$BUILD_DIR/staging
+
+# Include version file in the tarball
+if [ -f /tmp/asterisk_version.txt ]; then
+    cp /tmp/asterisk_version.txt $BUILD_DIR/staging/VERSION.txt
+fi
 
 cd $BUILD_DIR/staging
 TAR_NAME="asterisk-${ASTERISK_VER}-arm64-debian12.tar.gz"
