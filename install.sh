@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================
-# PROJECT:   Armbian PBX Installer (Asterisk 22 + FreePBX 17 + LAMP) v0.4.1
+# PROJECT:   Armbian PBX Installer (Asterisk 22 + FreePBX 17 + LAMP) v0.4.2
 # TARGET:    Debian 12 Bookworm ARM64
 # ============================================================================
 
@@ -281,6 +281,12 @@ cat > /etc/apache2/sites-available/freepbx.conf <<EOF
 <VirtualHost *:80>
     ServerAdmin webmaster@localhost
     DocumentRoot /var/www/html
+    
+    # Automatic redirect from root to /admin
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} ^/$
+    RewriteRule ^/$ /admin [R=302,L]
+    
     <Directory /var/www/html>
         Options Indexes FollowSymLinks
         AllowOverride All
@@ -377,7 +383,7 @@ fi
 
 if command -v fwconsole &> /dev/null; then
     fwconsole chown
-    fwconsole ma remove firewall 2>/dev/null
+    fwconsole ma remove firewall &>/dev/null || true
     fwconsole reload
 fi
 
