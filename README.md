@@ -1,8 +1,8 @@
 # Armbian 12 Bookworm FreePBX 17 Installer (ARM64)
 
-A vibe-coded, "one-click" installer for Asterisk 22 LTS and FreePBX 17 on Debian 12 (ARM64).
+One-click installer for Asterisk 22 LTS and FreePBX 17 on Debian 12 (ARM64).
 
-**Disclaimer:** This is an amateur project created solely for my personal workflow to quickly deploy PBX systems on T95 Max+ TV boxes. I am hosting it here for my own convenience and storage. It works for me, **it should work on every ARM64 Debian 12 device** but it might not work for you. Use entirely at your own risk.
+A Github Workflow runs every 8 weeks, compiles the newest Asterisk 22 LTS release and uploads it on this repo, ensuring the installation comes with the latest official release.
 
 ## **FreePBX 17 & Asterisk 22 Installer**
 **Installation**
@@ -30,11 +30,19 @@ This script completely removes the Asterisk, FreePBX, LAMP stack.
 * **Solid Stack:** Debian 12 (Bookworm), FreePBX 17, Asterisk 22 LTS, PHP 8.2.
 
 
-Access
-Web Interface: http://<YOUR_IP>/admin
+**Access**
+**Web Interface**: http://<YOUR_IP>/admin
 
-MariaDB Root Password: armbianpbx
+**MariaDB Root Password:** armbianpbx
 
+-------------------------------
+
+**Disclaimer:** This is an amateur project created with AI assistance solely for my personal workflow. I am hosting it here for my own convenience and storage.
+It works for me, **it should work on every ARM64 Debian 12 device** but it *might* not work for you.
+
+This project is **NOT** 100% vibe-coded. I don't have enough bash experience to create/maintain this project all on my own, but **I really wanted to make this work**, so I used AI assistance, mostly for debugging.
+
+-------------------------------
 
 ## (Extra Content) 
 ## Armbian 12 Image for T95 Max+ Android TV Box
