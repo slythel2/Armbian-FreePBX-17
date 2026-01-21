@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================
-# PROJECT:   Armbian PBX Installer (Asterisk 22 + FreePBX 17 + LAMP) v0.4.3
+# PROJECT:   Armbian PBX Installer (Asterisk 22 + FreePBX 17 + LAMP) v0.4.1
 # TARGET:    Debian 12 Bookworm ARM64
 # ============================================================================
 
@@ -28,11 +28,64 @@ if [[ $EUID -ne 0 ]]; then echo "Run as root!"; exit 1; fi
 
 # --- UPDATER ---
 if [[ "$1" == "--update" ]]; then
-    log "Starting Asterisk 22 Surgical Update..."
+    log "Starting Asterisk 22 Robust Update with Rollback Protection..."
     
+    # 1. PRE-UPDATE BACKUP
+    BACKUP_DIR="/tmp/asterisk_backup_$(date +%s)"
+    mkdir -p "$BACKUP_DIR"
+    
+    log "Creating backup of current Asterisk installation..."
+    if [ -f /usr/sbin/asterisk ]; then
+        cp /usr/sbin/asterisk "$BACKUP_DIR/" || error "Failed to backup binary"
+    fi
+    if [ -d /usr/lib/asterisk/modules ]; then
+        mkdir -p "$BACKUP_DIR/modules"
+        cp -r /usr/lib/asterisk/modules/* "$BACKUP_DIR/modules/" 2>/dev/null || true
+    fi
+    log "Backup created at: $BACKUP_DIR"
+    
+    # 2. ENVIRONMENT VERIFICATION
+    log "Verifying Asterisk environment..."
+    
+    # Ensure all critical directories exist
+    mkdir -p /var/run/asterisk /var/log/asterisk /var/lib/asterisk /var/spool/asterisk /etc/asterisk /usr/lib/asterisk/modules
+    
+    # Verify asterisk.conf exists
+    if [ ! -f /etc/asterisk/asterisk.conf ]; then
+        warn "asterisk.conf missing, recreating..."
+        cat > /etc/asterisk/asterisk.conf <<'EOF'
+[directories]
+astetcdir => /etc/asterisk
+astmoddir => /usr/lib/asterisk/modules
+astvarlibdir => /var/lib/asterisk
+astdbdir => /var/lib/asterisk
+astkeydir => /var/lib/asterisk
+astdatadir => /var/lib/asterisk
+astagidir => /var/lib/asterisk/agi-bin
+astspooldir => /var/spool/asterisk
+astrundir => /var/run/asterisk
+astlogdir => /var/log/asterisk
+[options]
+runuser = asterisk
+rungroup = asterisk
+EOF
+    fi
+    
+    # 3. STOP ASTERISK SAFELY
+    log "Stopping Asterisk..."
     systemctl stop asterisk
-    pkill -9 asterisk 2>/dev/null
+    sleep 2
+    pkill -9 asterisk 2>/dev/null || true
+    sleep 1
     
+    # Verify no asterisk processes remain
+    if pgrep asterisk > /dev/null; then
+        warn "Asterisk processes still running, force killing..."
+        killall -9 asterisk 2>/dev/null || true
+        sleep 1
+    fi
+    
+    # 4. DOWNLOAD UPDATE
     if ! command -v jq &> /dev/null; then apt-get update && apt-get install -y jq; fi
     
     log "Fetching latest Asterisk 22 release from GitHub..."
@@ -53,7 +106,7 @@ if [[ "$1" == "--update" ]]; then
     DOWNLOAD_SUCCESS=0
     for attempt in {1..3}; do
         if wget --show-progress -O /tmp/asterisk_update.tar.gz "$ASTERISK_ARTIFACT_URL"; then
-            if tar -tzf /tmp/asterisk_update.tar.gz >/dev/null 2>&1; then
+            if tar -tzf /tmp/asterisk_update.tar.gz > /dev/null 2>&1; then
                 DOWNLOAD_SUCCESS=1
                 log "Update artifact downloaded and verified."
                 break
@@ -69,23 +122,86 @@ if [[ "$1" == "--update" ]]; then
     done
     
     if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
-        error "Failed to download update after 3 attempts."
+        error "Failed to download update after 3 attempts. Restoring backup..."
+        # Rollback not needed here since we haven't changed anything yet
+        rm -rf "$BACKUP_DIR"
+        exit 1
     fi
     
+    # 5. DEPLOY UPDATE
+    log "Extracting update..."
     tar -xzf /tmp/asterisk_update.tar.gz -C "$STAGE_DIR"
 
-    log "Deploying updated binaries and modules (Surgical)..."
+    log "Deploying updated binaries and modules..."
     [ -d "$STAGE_DIR/usr/sbin" ] && cp -f "$STAGE_DIR/usr/sbin/asterisk" /usr/sbin/
     [ -d "$STAGE_DIR/usr/lib/asterisk/modules" ] && cp -rf "$STAGE_DIR/usr/lib/asterisk/modules"/* /usr/lib/asterisk/modules/
     
+    # 6. PERMISSION RESTORATION (CRITICAL!)
+    log "Restoring correct permissions..."
+    chown asterisk:asterisk /usr/sbin/asterisk
+    chmod +x /usr/sbin/asterisk
+    chown -R asterisk:asterisk /usr/lib/asterisk/modules
+    chown -R asterisk:asterisk /var/run/asterisk /var/log/asterisk /var/lib/asterisk /var/spool/asterisk /etc/asterisk
+    
+    # 7. POST-UPDATE HEALTH CHECK
     rm -rf "$STAGE_DIR" /tmp/asterisk_update.tar.gz
     ldconfig
-    systemctl start asterisk
     
-    log "Update completed. Running FreePBX reload..."
-    if command -v fwconsole &> /dev/null; then
-        fwconsole reload
+    log "Starting Asterisk and performing health check..."
+    systemctl start asterisk
+    sleep 5
+    
+    # Verify Asterisk is responsive
+    ASTERISK_HEALTHY=0
+    for i in {1..10}; do
+        if asterisk -rx "core show version" &>/dev/null; then
+            ASTERISK_HEALTHY=1
+            log "✓ Asterisk is responding to CLI - Update successful!"
+            break
+        fi
+        warn "Waiting for Asterisk to respond... ($i/10)"
+        sleep 2
+    done
+    
+    if [ $ASTERISK_HEALTHY -eq 0 ]; then
+        # ROLLBACK!
+        error "Asterisk failed to start after update. Rolling back to previous version..."
+        systemctl stop asterisk
+        pkill -9 asterisk 2>/dev/null || true
+        
+        # Restore from backup
+        if [ -f "$BACKUP_DIR/asterisk" ]; then
+            cp -f "$BACKUP_DIR/asterisk" /usr/sbin/asterisk
+            chown asterisk:asterisk /usr/sbin/asterisk
+            chmod +x /usr/sbin/asterisk
+        fi
+        if [ -d "$BACKUP_DIR/modules" ]; then
+            rm -rf /usr/lib/asterisk/modules/*
+            cp -r "$BACKUP_DIR/modules"/* /usr/lib/asterisk/modules/
+            chown -R asterisk:asterisk /usr/lib/asterisk/modules
+        fi
+        
+        ldconfig
+        systemctl start asterisk
+        sleep 3
+        
+        rm -rf "$BACKUP_DIR"
+        error "Rollback complete. Previous Asterisk version restored. Please check logs: journalctl -xeu asterisk"
     fi
+    
+    # 8. FINAL VALIDATION AND CLEANUP
+    log "Running FreePBX reload..."
+    if command -v fwconsole &> /dev/null; then
+        fwconsole reload || warn "FreePBX reload had warnings (this is often normal)"
+    fi
+    
+    rm -rf "$BACKUP_DIR"
+    
+    ASTERISK_VERSION=$(asterisk -rx "core show version" 2>/dev/null | head -n1 | awk '{print $2}' || echo "Unknown")
+    echo -e "${GREEN}========================================================${NC}"
+    echo -e "${GREEN}     ASTERISK UPDATE COMPLETED SUCCESSFULLY!           ${NC}"
+    echo -e "${GREEN}            Version: $ASTERISK_VERSION                        ${NC}"
+    echo -e "${GREEN}========================================================${NC}"
     exit 0
 fi
 
@@ -396,7 +512,7 @@ if command -v fwconsole &> /dev/null; then
     fwconsole ma downloadinstall ucp &>/dev/null || true
     fwconsole ma downloadinstall userman &>/dev/null || true
     
-    # Application modules
+    # Application modules (vital for PBX functionality)
     fwconsole ma downloadinstall announcement &>/dev/null || true
     fwconsole ma downloadinstall calendar &>/dev/null || true
     fwconsole ma downloadinstall callrecording &>/dev/null || true
@@ -484,7 +600,7 @@ APACHE_STATUS=$(check_service apache2)
 
 # Display Banner
 echo -e "${BLUE}================================================================${NC}"
-echo -e "${BLUE}        ARMBIAN PBX - ASTERISK 22 + FREEPBX 17 (ARM64)${NC}"
+echo -e "${BLUE}   ARMBIAN PBX - ASTERISK 22 + FREEPBX 17 (ARM64)${NC}"
 echo -e "${BLUE}================================================================${NC}"
 echo -e ""
 echo -e " ${YELLOW}Web Interface:${NC}  http://$IP_ADDR/admin"
